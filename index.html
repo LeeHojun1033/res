@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>맛집 저장소</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icon Library -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        * { -webkit-tap-highlight-color: transparent; }
+        @supports (padding: env(safe-area-inset-bottom)) {
+            .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        }
+        #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans h-[100dvh] flex flex-col overflow-hidden select-none">
+
+    <!-- 상단 헤더 -->
+    <header class="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-20">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid fa-utensils text-amber-400 text-lg"></i>
+            <h1 class="font-bold text-base md:text-lg text-slate-100 tracking-tight">맛집 저장소</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- 현위치 이동 버튼 -->
+            <button onclick="panToCurrentLocation()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-xl border border-slate-700/80 transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-location-crosshairs text-amber-400"></i>
+                <span>현위치</span>
+            </button>
+            <!-- 신규 등록 버튼 -->
+            <button onclick="openFormForAdd()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-xl font-semibold shadow-lg shadow-indigo-950 transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>등록</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 메인 레이아웃: [지도(상단/우측) + 목록(하단/좌측)] 한 화면 통합 구성 -->
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        
+        <!-- 지도 영역 (모바일: 화면 상단 42%, 데스크톱: 우측 전체) -->
+        <div id="map-panel" class="w-full h-[42%] md:h-full md:flex-1 relative bg-slate-950">
+            <div id="map"></div>
+            
+            <!-- 지도 안내 뱃지 -->
+            <div class="absolute bottom-3 left-3 z-10 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/80 text-[11px] text-slate-300 pointer-events-none flex items-center gap-1.5 shadow-lg">
+                <i class="fa-solid fa-circle-info text-amber-400"></i>
+                <span>지도를 클릭하면 해당 위치 주소로 위치가 등록/수정됩니다.</span>
+            </div>
+
+            <!-- 카카오 지도 오류/미연동 시 안내 폴백 레이어 -->
+            <div id="map-error-banner" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md z-20 flex flex-col items-center justify-center p-6 text-center">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-4xl mb-3"></i>
+                <h3 class="font-bold text-slate-100 text-sm md:text-base mb-1">카카오맵 연동 안내</h3>
+                <p class="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
+                    카카오 디벨로퍼스 콘솔의 <strong class="text-indigo-400">[내 애플리케이션 &gt; 플랫폼 &gt; Web]</strong>에 현재 접속 주소가 등록되어 있어야 지도가 정상적으로 표시됩니다.
+                </p>
+                <div class="flex gap-2">
+                    <button onclick="retryKakaoMap()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded-xl font-semibold transition">
+                        다시 시도
+                    </button>
+                    <button onclick="useOpenStreetMapFallback()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-4 py-2 rounded-xl font-medium transition">
+                        오픈 지도(OSM)로 표시
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 사이드바 목록 영역 (모바일: 화면 하단 58%, 데스크톱: 좌측 384px 고정) -->
+        <div id="sidebar-panel" class="w-full h-[58%] md:h-full md:w-96 bg-slate-900 border-t md:border-t-0 md:border-r border-slate-800 flex flex-col z-10 shadow-2xl relative overflow-hidden">
+            
+            <!-- 상단 상태 안내 -->
+            <div class="px-3.5 py-2 bg-slate-950/60 border-b border-slate-800/80 flex items-center justify-between text-xs font-medium shrink-0">
+                <span class="text-amber-400 flex items-center gap-1">
+                    <i class="fa-solid fa-arrow-down-wide-short"></i> 평점 높은 순 정렬
+                </span>
+                <span id="place-count-badge" class="text-slate-400 text-[11px]">총 0곳</span>
+            </div>
+
+            <!-- 카테고리 필터 바 -->
+            <div class="p-2.5 border-b border-slate-800 bg-slate-950/40 flex gap-1.5 overflow-x-auto text-xs shrink-0 scrollbar-none">
+                <button onclick="filterCategory('전체')" class="category-btn active bg-indigo-600 text-white px-3 py-1.5 rounded-full font-semibold whitespace-nowrap shadow-sm">전체</button>
+                <button onclick="filterCategory('한식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">한식</button>
+                <button onclick="filterCategory('중식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">중식</button>
+                <button onclick="filterCategory('일식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">일식</button>
+                <button onclick="filterCategory('양식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">양식</button>
+                <button onclick="filterCategory('카페')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">카페</button>
+                <button onclick="filterCategory('기타')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">기타</button>
+            </div>
+
+            <!-- 맛집 리스트 패널 -->
+            <div id="place-list" class="flex-1 overflow-y-auto divide-y divide-slate-800/60 bg-slate-900 safe-bottom">
+                <!-- JS에서 동적 생성됨 -->
+            </div>
+
+            <!-- 맛집 등록/수정 인라인 폼 패널 (목록창 내부 통합) -->
+            <div id="form-panel" class="hidden border-t border-slate-800 bg-slate-950/95 p-4 shrink-0 overflow-y-auto max-h-[70%] md:max-h-[85%] shadow-2xl z-20">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 id="form-title" class="font-bold text-slate-100 text-xs md:text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-pen-to-square text-indigo-400"></i> 맛집 정보 수정
+                    </h2>
+                    <button type="button" onclick="closeForm()" class="text-slate-400 hover:text-slate-200 p-1 transition">
+                        <i class="fa-solid fa-xmark text-base"></i>
+                    </button>
+                </div>
+
+                <form id="place-form" onsubmit="handleFormSubmit(event)" class="space-y-3 text-xs">
+                    <input type="hidden" id="place-id">
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1">상호명 (가게 이름) *</label>
+                        <div class="flex gap-1.5">
+                            <input type="text" id="input-name" required placeholder="가게 이름을 입력하세요" class="flex-1 bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500">
+                            <button type="button" onclick="searchAddress()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-2 rounded-xl font-medium transition whitespace-nowrap">상호 검색</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1">위치 정보 (주소) *</label>
+                        <div class="flex gap-1.5">
+                            <input type="text" id="input-address" required placeholder="직접 주소 입력 또는 지도 클릭" class="flex-1 bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500">
+                            <button type="button" onclick="searchSpecificAddress()" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-xl font-medium transition whitespace-nowrap">주소 검색</button>
+                        </div>
+                        <input type="hidden" id="input-lat">
+                        <input type="hidden" id="input-lng">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block font-medium text-slate-300 mb-1">카테고리 *</label>
+                            <select id="input-category" required class="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-2.5 py-2 focus:outline-none focus:border-indigo-500">
+                                <option value="한식">한식</option>
+                                <option value="중식">중식</option>
+                                <option value="일식">일식</option>
+                                <option value="양식">양식</option>
+                                <option value="카페">카페</option>
+                                <option value="기타">기타</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-slate-300 mb-1">평점 (0.5 단위) *</label>
+                            <select id="input-rating" required class="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-2.5 py-2 focus:outline-none focus:border-indigo-500">
+                                <option value="5.0">⭐⭐⭐⭐⭐ (5.0)</option>
+                                <option value="4.5">⭐⭐⭐⭐½ (4.5)</option>
+                                <option value="4.0">⭐⭐⭐⭐ (4.0)</option>
+                                <option value="3.5">⭐⭐⭐½ (3.5)</option>
+                                <option value="3.0">⭐⭐⭐ (3.0)</option>
+                                <option value="2.5">⭐⭐½ (2.5)</option>
+                                <option value="2.0">⭐⭐ (2.0)</option>
+                                <option value="1.5">⭐½ (1.5)</option>
+                                <option value="1.0">⭐ (1.0)</option>
+                                <option value="0.5">½ (0.5)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1">메모 / 리뷰</label>
+                        <textarea id="input-memo" rows="2" placeholder="추천 메뉴나 분위기 등을 작성하세요." class="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                    </div>
+
+                    <div class="flex gap-2 pt-1">
+                        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-2.5 rounded-xl transition shadow-lg shadow-indigo-950">저장하기</button>
+                        <button type="button" onclick="closeForm()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-4 py-2.5 rounded-xl transition">취소</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- 토스트 메시지 -->
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-slate-900/95 text-slate-100 text-xs px-4 py-2.5 rounded-2xl border border-slate-700/80 shadow-2xl transition-all duration-300 opacity-0 pointer-events-none z-50 flex items-center gap-2">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-indigo-400"></i>
+        <span id="toast-msg">알림 메시지</span>
+    </div>
+
+    <!-- Firebase v10 Realtime DB & Kakao Map Engine Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Firebase 설정
+        const firebaseConfig = {
+            apiKey: "AIzaSyBmJF8oDIVUkrzXayIhrzBCQwSdmozXVWo",
+            authDomain: "restaurant-8c4a3.firebaseapp.com",
+            databaseURL: "https://restaurant-8c4a3-default-rtdb.firebaseio.com",
+            projectId: "restaurant-8c4a3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const placesRef = ref(db, 'restaurants');
+
+        // 발급된 카카오 JavaScript 앱 키
+        const KAKAO_KEY = "f88913c579f0bc23016de619484e0156";
+
+        window.map = null;
+        window.leafletMap = null;
+        window.infoWindow = null;
+        window.markers = [];
+        window.leafletMarkers = [];
+        window.placesData = [];
+        window.currentFilter = '전체';
+        window.clickMarker = null;
+        window.isFallbackMode = false;
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initKakaoMapEngine();
+            listenRealtimeData();
+        });
+
+        // 1. Firebase 실시간 동기화 (onValue)
+        function listenRealtimeData() {
+            onValue(placesRef, (snapshot) => {
+                const data = snapshot.val();
+                window.placesData = [];
+                if (data) {
+                    Object.keys(data).forEach(key => {
+                        window.placesData.push({ id: key, ...data[key] });
+                    });
+                }
+                renderUI();
+            });
+        }
+
+        // 2. 카카오 지도 SDK 동적 로딩 및 지도 생성
+        function initKakaoMapEngine() {
+            if (window.kakao && window.kakao.maps) {
+                setupKakaoMap();
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&libraries=services&autoload=false`;
+
+            script.onload = () => {
+                try {
+                    kakao.maps.load(() => {
+                        setupKakaoMap();
+                    });
+                } catch (e) {
+                    console.warn('Kakao map load failed:', e);
+                    showMapErrorBanner();
+                }
+            };
+
+            script.onerror = (err) => {
+                console.warn('Kakao map script load error:', err);
+                showMapErrorBanner();
+            };
+
+            document.head.appendChild(script);
+        }
+
+        // 카카오 지도 인스턴스 설정
+        function setupKakaoMap() {
+            const container = document.getElementById('map');
+            if (!container) return;
+
+            const options = {
+                center: new kakao.maps.LatLng(37.5665, 126.9780), // 서울시청 기본 좌표
+                level: 4
+            };
+            window.map = new kakao.maps.Map(container, options);
+            window.infoWindow = new kakao.maps.InfoWindow({ zIndex: 1 });
+
+            // 아이폰 사파리 Flexbox 레이아웃 계산 후 지도 크기 재설정
+            setTimeout(() => {
+                if (window.map) {
+                    window.map.relayout();
+                    window.map.setCenter(new kakao.maps.LatLng(37.5665, 126.9780));
+                }
+            }, 300);
+
+            // 지도 클릭 이벤트 (신규 등록 및 수정 위치 갱신)
+            kakao.maps.event.addListener(window.map, 'click', (mouseEvent) => {
+                const lat = mouseEvent.latLng.getLat();
+                const lng = mouseEvent.latLng.getLng();
+
+                if (window.clickMarker) window.clickMarker.setMap(null);
+                window.clickMarker = new kakao.maps.Marker({
+                    position: new kakao.maps.LatLng(lat, lng),
+                    map: window.map
+                });
+
+                // Geocoder: 좌표 -> 주소 변환
+                const geocoder = new kakao.maps.services.Geocoder();
+                geocoder.coord2Address(lng, lat, (result, status) => {
+                    let addressName = '선택 위치 주소';
+                    if (status === kakao.maps.services.Status.OK && result[0]) {
+                        addressName = result[0].road_address 
+                            ? result[0].road_address.address_name 
+                            : result[0].address.address_name;
+                    }
+                    
+                    const isEditing = !!document.getElementById('place-id').value;
+                    if (isEditing) {
+                        updateFormLocation(lat, lng, addressName);
+                        showToast('📍 클릭한 위치로 변경되었습니다.');
+                    } else {
+                        openFormForAdd(lat, lng, addressName);
+                    }
+                });
+            });
+
+            // 창 크기 및 화면 방향 변경 시 지도 리사이즈 대응
+            window.addEventListener('resize', () => {
+                if (window.map) {
+                    window.map.relayout();
+                }
+            });
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    if (window.map) window.map.relayout();
+                }, 200);
+            });
+
+            panToCurrentLocation();
+            renderUI();
+        }
+
+        // 카카오맵 오류 안내 레이어 표시
+        function showMapErrorBanner() {
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.remove('hidden');
+        }
+
+        window.retryKakaoMap = function() {
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.add('hidden');
+            initKakaoMapEngine();
+        };
+
+        // 오픈 지도(OpenStreetMap) 폴백 로더
+        window.useOpenStreetMapFallback = function() {
+            if (window.isFallbackMode) return;
+            window.isFallbackMode = true;
+
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.add('hidden');
+
+            const css = document.createElement('link');
+            css.rel = 'stylesheet';
+            css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            document.head.appendChild(css);
+
+            const js = document.createElement('script');
+            js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            js.onload = () => {
+                const container = document.getElementById('map');
+                container.innerHTML = '';
+                
+                window.leafletMap = L.map('map').setView([37.5665, 126.9780], 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap'
+                }).addTo(window.leafletMap);
+
+                window.leafletMap.on('click', (e) => {
+                    const lat = e.latlng.lat;
+                    const lng = e.latlng.lng;
+                    const addressName = `선택 좌표 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+
+                    const isEditing = !!document.getElementById('place-id').value;
+                    if (isEditing) {
+                        updateFormLocation(lat, lng, addressName);
+                        showToast('📍 클릭한 위치로 변경되었습니다.');
+                    } else {
+                        openFormForAdd(lat, lng, addressName);
+                    }
+                });
+
+                panToCurrentLocation();
+                renderUI();
+            };
+            document.head.appendChild(js);
+        };
+
+        window.updateFormLocation = function(lat, lng, address) {
+            document.getElementById('input-lat').value = lat;
+            document.getElementById('input-lng').value = lng;
+            document.getElementById('input-address').value = address;
+        };
+
+        // 3. UI 렌더링 & 평점 높은 순 정렬
+        window.renderUI = function() {
+            let filtered = window.currentFilter === '전체' 
+                ? [...window.placesData] 
+                : window.placesData.filter(p => p.category === window.currentFilter);
+
+            // 평점 높은 순 내림차순 정렬
+            filtered.sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+
+            document.getElementById('place-count-badge').innerText = `총 ${filtered.length}곳`;
+
+            // 카카오 지도 마커 제거
+            if (window.markers) {
+                window.markers.forEach(m => { if (m.setMap) m.setMap(null); });
+            }
+            window.markers = [];
+
+            // Leaflet 지도 마커 제거
+            if (window.leafletMarkers && window.leafletMap) {
+                window.leafletMarkers.forEach(m => window.leafletMap.removeLayer(m));
+            }
+            window.leafletMarkers = [];
+
+            const listContainer = document.getElementById('place-list');
+            listContainer.innerHTML = '';
+
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="p-8 text-center text-slate-500 text-xs">
+                        <i class="fa-solid fa-utensils text-2xl mb-2 text-slate-600 block"></i>
+                        <p>등록된 맛집이 없습니다.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            filtered.forEach((place, index) => {
+                const lat = parseFloat(place.latitude) || 37.5665;
+                const lng = parseFloat(place.longitude) || 126.9780;
+
+                // 카카오 지도 마커 및 클릭 팝업 생성
+                if (!window.isFallbackMode && window.map && typeof kakao !== 'undefined' && kakao.maps) {
+                    const markerPosition = new kakao.maps.LatLng(lat, lng);
+                    
+                    // 기본 위치 표시용 마커
+                    const marker = new kakao.maps.Marker({
+                        position: markerPosition,
+                        map: window.map
+                    });
+
+                    // 가게 이름과 평점만 항상 보여주는 프리미엄 커스텀 오버레이
+                    const overlayContent = `
+                        <div class="bg-slate-900/95 backdrop-blur-md border border-slate-700/80 shadow-2xl rounded-xl px-3 py-1.5 flex flex-col items-center justify-center pointer-events-none">
+                            <span class="text-slate-100 font-bold text-[11px] whitespace-nowrap leading-tight">${escapeHtml(place.name)}</span>
+                            <span class="text-amber-400 font-bold text-[10px] mt-0.5">⭐ ${parseFloat(place.rating).toFixed(1)}</span>
+                        </div>
+                    `;
+
+                    const customOverlay = new kakao.maps.CustomOverlay({
+                        position: markerPosition,
+                        content: overlayContent,
+                        map: window.map,
+                        yAnchor: 2.2 // 마커 핀 위쪽으로 라벨 띄우기
+                    });
+
+                    // 리스트 갱신 시 오버레이도 함께 삭제하기 위해 배열에 추가
+                    window.markers.push(marker);
+                    window.markers.push(customOverlay);
+                    
+                } else if (window.leafletMap) {
+                    const lMarker = L.marker([lat, lng]).addTo(window.leafletMap)
+                        .bindPopup(`<div style="text-align:center; font-size: 12px;"><b>${escapeHtml(place.name)}</b><br>⭐ ${parseFloat(place.rating).toFixed(1)}</div>`);
+                    window.leafletMarkers.push(lMarker);
+                }
+
+                // 맛집 목록 카드 DOM 생성
+                const itemEl = document.createElement('div');
+                itemEl.className = 'p-3 hover:bg-slate-800/80 transition cursor-pointer flex justify-between items-start group';
+                itemEl.innerHTML = `
+                    <div class="flex-1 min-w-0 pr-2" onclick="focusPlace(${lat}, ${lng}, '${escapeHtml(place.name)}')">
+                        <div class="flex items-center gap-1.5 mb-1 flex-wrap">
+                            <span class="text-[10px] font-bold bg-indigo-950 text-indigo-400 border border-indigo-800/80 px-2 py-0.5 rounded-md">TOP ${index + 1}</span>
+                            <span class="font-bold text-slate-100 text-sm group-hover:text-indigo-400 transition truncate">${escapeHtml(place.name)}</span>
+                            <span class="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded-md border border-slate-700/60 font-medium">${escapeHtml(place.category)}</span>
+                        </div>
+                        <p class="text-xs text-slate-400 mb-1 line-clamp-1"><i class="fa-solid fa-location-dot text-[10px] text-slate-500 mr-1"></i>${escapeHtml(place.address)}</p>
+                        <div class="flex items-center gap-2 text-xs">
+                            <span class="text-amber-400 font-bold">⭐ ${parseFloat(place.rating).toFixed(1)}</span>
+                            ${place.memo ? `<span class="text-slate-500 text-[11px] truncate max-w-[150px]">${escapeHtml(place.memo)}</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="flex gap-1 opacity-90 group-hover:opacity-100 transition">
+                        <button onclick="openFormForEdit('${place.id}')" class="p-1.5 text-slate-400 hover:text-indigo-400 text-xs rounded-lg hover:bg-slate-800" title="수정">
+                            <i class="fa-solid fa-pen-to-square"></i>
+                        </button>
+                        <button onclick="deletePlace('${place.id}')" class="p-1.5 text-slate-400 hover:text-rose-400 text-xs rounded-lg hover:bg-slate-800" title="삭제">
+                            <i class="fa-solid fa-trash-can"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(itemEl);
+            });
+        };
+
+        window.filterCategory = function(cat) {
+            window.currentFilter = cat;
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                if (btn.innerText === cat) {
+                    btn.className = 'category-btn active bg-indigo-600 text-white px-3 py-1.5 rounded-full font-semibold whitespace-nowrap shadow-sm';
+                } else {
+                    btn.className = 'category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition';
+                }
+            });
+
+            renderUI();
+
+            if (cat === '전체' && window.map && window.placesData.length > 0 && typeof kakao !== 'undefined' && kakao.maps) {
+                const bounds = new kakao.maps.LatLngBounds();
+                window.placesData.forEach(p => bounds.extend(new kakao.maps.LatLng(p.latitude, p.longitude)));
+                window.map.setBounds(bounds);
+            }
+        };
+
+        window.panToCurrentLocation = function() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    const lat = pos.coords.latitude;
+                    const lng = pos.coords.longitude;
+                    if (!window.isFallbackMode && window.map && typeof kakao !== 'undefined') {
+                        window.map.panTo(new kakao.maps.LatLng(lat, lng));
+                    } else if (window.leafletMap) {
+                        window.leafletMap.setView([lat, lng], 15);
+                    }
+                    showToast('현재 위치로 이동했습니다.');
+                });
+            }
+        };
+
+        window.focusPlace = function(lat, lng, name) {
+            if (!window.isFallbackMode && window.map && typeof kakao !== 'undefined') {
+                const loc = new kakao.maps.LatLng(lat, lng);
+                window.map.panTo(loc);
+            } else if (window.leafletMap) {
+                window.leafletMap.setView([lat, lng], 16);
+            }
+        };
+
+        // 카카오 장소 키워드 검색
+        window.searchAddress = function() {
+            const keyword = document.getElementById('input-name').value.trim();
+            if (!keyword) {
+                showToast('상호명을 입력해 주세요.');
+                return;
+            }
+
+            if (!window.isFallbackMode && typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services) {
+                const ps = new kakao.maps.services.Places();
+                const options = window.map ? {
+                    location: window.map.getCenter(),
+                    sort: kakao.maps.services.SortBy.DISTANCE
+                } : {};
+
+                ps.keywordSearch(keyword, (data, status) => {
+                    if (status === kakao.maps.services.Status.OK && data.length > 0) {
+                        const place = data[0];
+                        const lat = parseFloat(place.y);
+                        const lng = parseFloat(place.x);
+                        const address = place.road_address_name || place.address_name;
+
+                        document.getElementById('input-name').value = place.place_name;
+                        updateFormLocation(lat, lng, address);
+
+                        if (window.map) {
+                            window.map.panTo(new kakao.maps.LatLng(lat, lng));
+                            
+                            // 검색된 위치에 클릭 마커 표시
+                            if (window.clickMarker) window.clickMarker.setMap(null);
+                            window.clickMarker = new kakao.maps.Marker({
+                                position: new kakao.maps.LatLng(lat, lng),
+                                map: window.map
+                            });
+                        }
+                        showToast(`'${place.place_name}' 장소를 확인했습니다.`);
+                    } else {
+                        showToast('상호명 검색 결과를 찾을 수 없습니다.');
+                    }
+                }, options);
+            } else {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            updateFormLocation(lat, lng, data[0].display_name);
+                            if (window.leafletMap) window.leafletMap.setView([lat, lng], 16);
+                            showToast('검색 위치가 적용되었습니다.');
+                        } else {
+                            showToast('상호명 검색 결과를 찾지 못했습니다.');
+                        }
+                    });
+            }
+        };
+
+        // 카카오 주소 기반 검색 기능 추가 (도로명/지번 주소 검색)
+        window.searchSpecificAddress = function() {
+            const address = document.getElementById('input-address').value.trim();
+            if (!address) {
+                showToast('검색할 주소를 입력해 주세요.');
+                return;
+            }
+
+            if (!window.isFallbackMode && typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services) {
+                const geocoder = new kakao.maps.services.Geocoder();
+                
+                // 1. 먼저 주소 검색(Geocoder) 시도
+                geocoder.addressSearch(address, (data, status) => {
+                    if (status === kakao.maps.services.Status.OK && data.length > 0) {
+                        const place = data[0];
+                        const lat = parseFloat(place.y);
+                        const lng = parseFloat(place.x);
+                        const addressName = place.road_address ? place.road_address.address_name : place.address.address_name;
+
+                        updateFormLocation(lat, lng, addressName);
+
+                        if (window.map) {
+                            window.map.panTo(new kakao.maps.LatLng(lat, lng));
+                            
+                            if (window.clickMarker) window.clickMarker.setMap(null);
+                            window.clickMarker = new kakao.maps.Marker({
+                                position: new kakao.maps.LatLng(lat, lng),
+                                map: window.map
+                            });
+                        }
+                        showToast('입력하신 주소 위치를 확인했습니다.');
+                    } else {
+                        // 2. 주소로 결과가 없으면 장소(키워드) 검색으로 자동 대체 시도
+                        const ps = new kakao.maps.services.Places();
+                        ps.keywordSearch(address, (data2, status2) => {
+                            if (status2 === kakao.maps.services.Status.OK && data2.length > 0) {
+                                const place2 = data2[0];
+                                const lat2 = parseFloat(place2.y);
+                                const lng2 = parseFloat(place2.x);
+                                const addressName2 = place2.road_address_name || place2.address_name;
+
+                                updateFormLocation(lat2, lng2, addressName2);
+                                if (window.map) {
+                                    window.map.panTo(new kakao.maps.LatLng(lat2, lng2));
+                                    
+                                    if (window.clickMarker) window.clickMarker.setMap(null);
+                                    window.clickMarker = new kakao.maps.Marker({
+                                        position: new kakao.maps.LatLng(lat2, lng2),
+                                        map: window.map
+                                    });
+                                }
+                                showToast('입력하신 장소 위치를 확인했습니다.');
+                            } else {
+                                showToast('해당 주소나 장소를 찾을 수 없습니다.');
+                            }
+                        });
+                    }
+                });
+            } else {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            updateFormLocation(lat, lng, data[0].display_name);
+                            if (window.leafletMap) window.leafletMap.setView([lat, lng], 16);
+                            showToast('입력하신 주소 위치가 적용되었습니다.');
+                        } else {
+                            showToast('주소 검색 결과를 찾지 못했습니다.');
+                        }
+                    });
+            }
+        };
+
+        window.openFormForAdd = function(lat = '', lng = '', address = '') {
+            const formPanel = document.getElementById('form-panel');
+            formPanel.classList.remove('hidden');
+            document.getElementById('form-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-400"></i> 맛집 등록`;
+            document.getElementById('place-id').value = '';
+            document.getElementById('place-form').reset();
+
+            if (lat && lng) {
+                updateFormLocation(lat, lng, address);
+            }
+            formPanel.scrollIntoView({ behavior: 'smooth' });
+        };
+
+        window.openFormForEdit = function(id) {
+            const place = window.placesData.find(p => p.id === id);
+            if (!place) return;
+
+            const formPanel = document.getElementById('form-panel');
+            formPanel.classList.remove('hidden');
+            document.getElementById('form-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-400"></i> 맛집 정보 수정 (지도를 클릭하면 위치 변경)`;
+            
+            document.getElementById('place-id').value = place.id;
+            document.getElementById('input-name').value = place.name;
+            document.getElementById('input-address').value = place.address;
+            document.getElementById('input-lat').value = place.latitude;
+            document.getElementById('input-lng').value = place.longitude;
+            document.getElementById('input-category').value = place.category;
+            document.getElementById('input-rating').value = parseFloat(place.rating).toFixed(1);
+            document.getElementById('input-memo').value = place.memo || '';
+
+            if (!window.isFallbackMode && window.map && typeof kakao !== 'undefined') {
+                window.map.panTo(new kakao.maps.LatLng(place.latitude, place.longitude));
+            }
+            formPanel.scrollIntoView({ behavior: 'smooth' });
+        };
+
+        window.closeForm = function() {
+            document.getElementById('form-panel').classList.add('hidden');
+            if (window.clickMarker && window.clickMarker.setMap) window.clickMarker.setMap(null);
+        };
+
+        window.handleFormSubmit = function(e) {
+            e.preventDefault();
+
+            const id = document.getElementById('place-id').value;
+            const payload = {
+                name: document.getElementById('input-name').value,
+                address: document.getElementById('input-address').value,
+                latitude: parseFloat(document.getElementById('input-lat').value),
+                longitude: parseFloat(document.getElementById('input-lng').value),
+                category: document.getElementById('input-category').value,
+                rating: parseFloat(document.getElementById('input-rating').value),
+                memo: document.getElementById('input-memo').value,
+                updated_at: new Date().toISOString()
+            };
+
+            if (isNaN(payload.latitude) || isNaN(payload.longitude)) {
+                showToast('지도를 클릭하여 위치를 지정해 주세요.');
+                return;
+            }
+
+            if (id) {
+                update(ref(db, `restaurants/${id}`), payload).then(() => {
+                    showToast('맛집 정보 및 위치가 수정되었습니다.');
+                    closeForm();
+                });
+            } else {
+                payload.created_at = new Date().toISOString();
+                push(placesRef, payload).then(() => {
+                    showToast('새로운 맛집이 저장되었습니다.');
+                    closeForm();
+                });
+            }
+        };
+
+        window.deletePlace = function(id) {
+            if (confirm('정말 맛집을 삭제하시겠습니까?')) {
+                remove(ref(db, `restaurants/${id}`)).then(() => {
+                    showToast('삭제가 완료되었습니다.');
+                });
+            }
+        };
+
+        window.showToast = function(msg) {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'pointer-events-none');
+            }, 2300);
+        };
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            return text.replace(/[&<>"']/g, (m) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+            })[m]);
+        }
+    </script>
+</body>
+</html>
