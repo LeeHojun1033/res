@@ -1,0 +1,1387 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>맛집 저장소</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icon Library -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        * { -webkit-tap-highlight-color: transparent; }
+        @supports (padding: env(safe-area-inset-bottom)) {
+            .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+        }
+        #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans h-[100dvh] flex flex-col overflow-hidden select-none">
+
+    <header class="h-14 bg-slate-950 border-b border-slate-800 px-4 flex items-center justify-between shrink-0 z-20 relative">
+        <div class="flex items-center gap-2">
+            <i class="fa-solid fa-utensils text-amber-400 text-lg"></i>
+            <h1 class="font-bold text-base md:text-lg text-slate-100 tracking-tight">맛집 저장소</h1>
+        </div>
+        <div class="flex items-center gap-2">
+            <!-- 현위치 이동 버튼 -->
+            <button onclick="panToCurrentLocation()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-2 rounded-xl border border-slate-700/80 transition flex items-center gap-1.5 active:scale-95 shadow-sm">
+                <i class="fa-solid fa-location-crosshairs text-amber-400"></i>
+                <span class="hidden sm:inline">현위치</span>
+            </button>
+            <!-- 추천 버튼 -->
+            <button onclick="recommendPlaces()" class="bg-rose-600 hover:bg-rose-500 text-white text-xs px-3 py-2 rounded-xl font-semibold shadow-lg shadow-rose-950 transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-thumbs-up"></i>
+                <span>추천</span>
+            </button>
+            <!-- 신규 등록 버튼 -->
+            <button onclick="openFormForAdd()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-3 py-2 rounded-xl font-semibold shadow-lg shadow-indigo-950 transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-plus"></i>
+                <span>등록</span>
+            </button>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden relative">
+        
+        <div id="map-panel" class="w-full flex-1 md:h-full relative bg-slate-950 z-0">
+            <div id="map"></div>
+            
+            <!-- 지도 안내 뱃지 -->
+            <div class="absolute bottom-6 md:bottom-3 left-3 z-10 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700/80 text-[11px] text-slate-300 pointer-events-none flex items-center gap-1.5 shadow-lg">
+                <i class="fa-solid fa-circle-info text-amber-400"></i>
+                <span class="hidden sm:inline">지도를 클릭하면 해당 위치 주소로 위치가 등록/수정됩니다.</span>
+                <span class="sm:hidden">지도 클릭 시 위치가 등록됩니다.</span>
+            </div>
+
+            <!-- 카카오 지도 오류/미연동 시 안내 폴백 레이어 -->
+            <div id="map-error-banner" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md z-20 flex flex-col items-center justify-center p-6 text-center">
+                <i class="fa-solid fa-triangle-exclamation text-amber-400 text-4xl mb-3"></i>
+                <h3 class="font-bold text-slate-100 text-sm md:text-base mb-1">카카오맵 연동 안내</h3>
+                <p class="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
+                    카카오 디벨로퍼스 콘솔의 <strong class="text-indigo-400">[내 애플리케이션 &gt; 플랫폼 &gt; Web]</strong>에 현재 접속 주소가 등록되어 있어야 지도가 정상적으로 표시됩니다.
+                </p>
+                <div class="flex gap-2">
+                    <button onclick="retryKakaoMap()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded-xl font-semibold transition">
+                        다시 시도
+                    </button>
+                    <button onclick="useOpenStreetMapFallback()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs px-4 py-2 rounded-xl font-medium transition">
+                        오픈 지도(OSM)로 표시
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="sidebar-panel" class="w-full h-[58%] md:h-full md:w-[400px] bg-slate-900 border-t md:border-t-0 md:border-l border-slate-800 flex flex-col z-10 shadow-2xl absolute md:relative bottom-0 transition-transform duration-300 ease-out md:transition-none translate-y-0">
+            
+            <!-- 모바일 전체화면용 드래그 핸들 (모바일에서만 표시) -->
+            <div id="drag-handle" class="md:hidden w-full h-8 flex flex-col items-center justify-center bg-slate-900 shrink-0 cursor-ns-resize touch-none" title="위아래로 드래그하여 화면 크기 조절">
+                <div class="w-12 h-1.5 bg-slate-600 rounded-full mb-1"></div>
+                <div class="text-[9px] text-slate-500 font-medium">위로 밀어 리스트 보기</div>
+            </div>
+
+            <!-- 상단 상태 안내 및 정렬/지역 필터 -->
+            <div class="px-3.5 py-2 bg-slate-950/60 border-y border-slate-800/80 flex items-center justify-between text-xs font-medium shrink-0">
+                <div class="flex items-center gap-3">
+                    <button id="sort-toggle-btn" onclick="toggleSortMode()" class="text-amber-400 flex items-center gap-1 hover:brightness-125 transition cursor-pointer active:scale-95 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700/50 shadow-sm">
+                        <i id="sort-icon" class="fa-solid fa-arrow-down-wide-short"></i> 
+                        <span id="sort-text">평점 순</span>
+                    </button>
+                    
+                    <!-- 지역 필터 드롭다운 -->
+                    <div class="relative flex items-center">
+                        <i class="fa-solid fa-map-location-dot text-indigo-400 absolute left-2 text-[11px] pointer-events-none"></i>
+                        <select id="region-filter" onchange="filterRegion(this.value)" class="bg-slate-900 border border-slate-700/80 text-slate-200 text-[11px] font-medium rounded-lg pl-6 pr-6 py-1.5 appearance-none focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 cursor-pointer shadow-sm w-[90px] truncate">
+                            <option value="전체">전체 지역</option>
+                        </select>
+                        <i class="fa-solid fa-chevron-down text-slate-500 absolute right-2 text-[9px] pointer-events-none"></i>
+                    </div>
+                </div>
+                <span id="place-count-badge" class="text-slate-400 text-[11px] bg-slate-800/50 px-2 py-1 rounded-md">총 0곳</span>
+            </div>
+
+            <div class="p-2 border-b border-slate-800 bg-slate-950/40 flex gap-1.5 overflow-x-auto text-xs shrink-0 scrollbar-none">
+                <button onclick="filterCategory('전체')" class="category-btn active bg-indigo-600 text-white px-3 py-1.5 rounded-full font-semibold whitespace-nowrap shadow-sm">전체</button>
+                <button onclick="filterCategory('카페')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">카페</button>
+                <button onclick="filterCategory('한식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">한식</button>
+                <button onclick="filterCategory('양식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">양식</button>
+                <button onclick="filterCategory('일식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">일식</button>
+                <button onclick="filterCategory('중식')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">중식</button>
+                <button onclick="filterCategory('기타')" class="category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition">기타</button>
+            </div>
+
+            <!-- 맛집 리스트 패널 -->
+            <div id="place-list" class="flex-1 overflow-y-auto divide-y divide-slate-800/60 bg-slate-900 safe-bottom scroll-smooth">
+                <!-- JS에서 동적 생성됨 -->
+            </div>
+
+            <div id="form-panel" class="hidden absolute bottom-0 left-0 right-0 border-t border-slate-700 bg-slate-900/95 backdrop-blur-xl p-4 shrink-0 overflow-y-auto max-h-[85%] md:max-h-full shadow-[0_-10px_40px_rgba(0,0,0,0.5)] z-30 transition-transform">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 id="form-title" class="font-bold text-slate-100 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-pen-to-square text-indigo-400"></i> 맛집 정보 수정
+                    </h2>
+                    <button type="button" onclick="closeForm()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 w-7 h-7 rounded-full flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+
+                <form id="place-form" onsubmit="handleFormSubmit(event)" class="space-y-3.5 text-xs">
+                    <input type="hidden" id="place-id">
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1 ml-1">상호명 (가게 이름) <span class="text-rose-400">*</span></label>
+                        <div class="flex gap-2 relative">
+                            <input type="text" id="input-name" required placeholder="가게 이름을 입력하세요" class="flex-1 bg-slate-950 border border-slate-700/80 text-slate-100 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner">
+                            <button type="button" onclick="searchAddress()" class="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2.5 rounded-xl font-medium transition whitespace-nowrap shadow-sm shadow-indigo-900/50">상호 검색</button>
+                        </div>
+                        <!-- 상호 검색 결과 드롭다운 목록 -->
+                        <ul id="name-search-results" class="hidden mt-1.5 bg-slate-800 border border-slate-700 rounded-xl max-h-48 overflow-y-auto shadow-2xl text-xs divide-y divide-slate-700/50 absolute w-[calc(100%-2rem)] z-50"></ul>
+                    </div>
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1 ml-1">위치 정보 (주소) <span class="text-rose-400">*</span></label>
+                        <div class="flex gap-2">
+                            <input type="text" id="input-address" required placeholder="직접 주소 입력 또는 지도 클릭" class="flex-1 bg-slate-950 border border-slate-700/80 text-slate-100 rounded-xl px-3.5 py-2.5 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner">
+                            <button type="button" onclick="searchSpecificAddress()" class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2.5 rounded-xl font-medium transition whitespace-nowrap shadow-sm shadow-slate-900/50">주소 검색</button>
+                        </div>
+                        <input type="hidden" id="input-lat">
+                        <input type="hidden" id="input-lng">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-3">
+                        <div>
+                            <label class="block font-medium text-slate-300 mb-1 ml-1">카테고리 <span class="text-rose-400">*</span></label>
+                            <select id="input-category" required class="w-full bg-slate-950 border border-slate-700/80 text-slate-100 rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner cursor-pointer appearance-none">
+                                <option value="카페">☕ 카페</option>
+                                <option value="한식">🍚 한식</option>
+                                <option value="양식">🍝 양식</option>
+                                <option value="일식">🍣 일식</option>
+                                <option value="중식">🍜 중식</option>
+                                <option value="기타">🍽️ 기타</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block font-medium text-slate-300 mb-1 ml-1">평점 (0.5 단위) <span class="text-rose-400">*</span></label>
+                            <select id="input-rating" required class="w-full bg-slate-950 border border-slate-700/80 text-slate-100 rounded-xl px-3 py-2.5 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-inner cursor-pointer appearance-none">
+                                <option value="5.0">⭐⭐⭐⭐⭐ (5.0)</option>
+                                <option value="4.5">⭐⭐⭐⭐½ (4.5)</option>
+                                <option value="4.0">⭐⭐⭐⭐ (4.0)</option>
+                                <option value="3.5">⭐⭐⭐½ (3.5)</option>
+                                <option value="3.0">⭐⭐⭐ (3.0)</option>
+                                <option value="2.5">⭐⭐½ (2.5)</option>
+                                <option value="2.0">⭐⭐ (2.0)</option>
+                                <option value="1.5">⭐½ (1.5)</option>
+                                <option value="1.0">⭐ (1.0)</option>
+                                <option value="0.5">½ (0.5)</option>
+                                <option value="0.0">📌 방문예정</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block font-medium text-slate-300 mb-1 ml-1">메모 / 리뷰</label>
+                        <textarea id="input-memo" rows="3" placeholder="추천 메뉴나 분위기 등을 작성하세요." class="w-full bg-slate-950 border border-slate-700/80 text-slate-100 rounded-xl px-3.5 py-3 text-xs focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none shadow-inner leading-relaxed"></textarea>
+                    </div>
+
+                    <div class="flex gap-2 pt-2 pb-1">
+                        <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-indigo-900/40 text-sm">저장하기</button>
+                        <button type="button" onclick="closeForm()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium px-5 py-3 rounded-xl transition text-sm">취소</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+    </main>
+
+    <div id="toast" class="fixed top-5 left-1/2 -translate-x-1/2 bg-slate-800/95 backdrop-blur text-slate-100 text-xs px-4 py-3 rounded-2xl border border-slate-600/50 shadow-2xl transition-all duration-300 opacity-0 pointer-events-none z-[100] flex items-center gap-2.5 max-w-[90vw] whitespace-nowrap">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400 text-sm"></i>
+        <span id="toast-msg" class="font-medium">알림 메시지</span>
+    </div>
+
+    <!-- Firebase v10 Realtime DB & Kakao Map Engine Script -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, push, onValue, remove, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Firebase 설정
+        const firebaseConfig = {
+            apiKey: "AIzaSyBmJF8oDIVUkrzXayIhrzBCQwSdmozXVWo",
+            authDomain: "restaurant-8c4a3.firebaseapp.com",
+            databaseURL: "https://restaurant-8c4a3-default-rtdb.firebaseio.com",
+            projectId: "restaurant-8c4a3"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const placesRef = ref(db, 'restaurants');
+
+        // 발급된 카카오 JavaScript 앱 키
+        const KAKAO_KEY = "f88913c579f0bc23016de619484e0156";
+
+        let map = null;
+        let leafletMap = null;
+        let infoWindow = null;
+        let markers = [];
+        let leafletMarkers = [];
+        let placesData = [];
+        let customOverlays = {}; 
+        let maxZIndex = 10;      
+        
+        let currentFilter = '전체';
+        let currentRegion = '전체'; // 지역 필터 상태 변수
+        let currentSort = 'rating'; 
+        let userLat = null;         
+        let userLng = null;         
+        let clickMarker = null;
+        let isFallbackMode = false;
+        let toastTimeout = null;
+
+        // 현위치 표시용 마커 변수
+        let userLocOverlay = null; 
+        let userLocLeafletMarker = null;
+
+        let isRecommendationMode = false; 
+        let recommendedPlaceIds = [];     
+        let recommendationHistory = [];   
+
+        // XSS 방지를 위한 HTML escape 유틸리티 함수
+        function escapeHtml(str) {
+            if (str === null || str === undefined) return '';
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // 거리 계산 (Haversine 공식)
+        function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * (Math.PI/180);
+            const dLon = (lon2 - lon1) * (Math.PI/180);
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * 
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
+            return R * c;
+        }
+
+        // --- 요청하신 세분화 로직이 적용된 함수 ---
+        function getRegionName(address) {
+            if (!address) return '기타';
+            const addr = address.trim();
+
+            // 1. '여수'가 포함된 주소는 '전남'으로 통합
+            if (addr.includes('여수')) {
+                return '전남';
+            }
+
+            // 2. 광주 5개 구 묶음 처리 (동구, 서구, 남구, 북구, 광산구)
+            if (addr.includes('광주광역시')) {
+                return '광주';
+            }
+            
+            // 만약 구 이름만 적혀 있을 경우를 대비하여 묶음 확인 (타 지역 구와 중복 방지)
+            if (addr.includes('광산구') || addr.includes('동구') || 
+                addr.includes('서구') || addr.includes('남구') || addr.includes('북구')) {
+                // 타 지역과 겹치지 않게 전남이나 광주 키워드가 있을 경우에만
+                if (addr.includes('전남') || addr.includes('광주')) {
+                    return '광주';
+                }
+            }
+
+            // 3. 기본 시/도 파싱 로직 ('전남광주통합특별시' 등을 '전남'으로 매핑)
+            let firstWord = addr.split(' ')[0];
+            const map = {
+                '서울특별시': '서울', '부산광역시': '부산', '대구광역시': '대구', 
+                '인천광역시': '인천', '광주광역시': '광주', '대전광역시': '대전', 
+                '울산광역시': '울산', '세종특별자치시': '세종', '제주특별자치도': '제주', 
+                '강원특별자치도': '강원', '전북특별자치도': '전북', '충청북도': '충북',
+                '충청남도': '충남', '경상북도': '경북', '경상남도': '경남',
+                '전라북도': '전북', '전라남도': '전남', '경기도': '경기',
+                '전남': '전남', '전북': '전북', '경남': '경남', '경북': '경북', 
+                '충남': '충남', '충북': '충북',
+                '전남광주특별시': '전남',
+                '전남광주통합특별시': '전남'
+            };
+            return map[firstWord] || firstWord;
+        }
+        // ----------------------------------------
+
+        function updateRegionFilterOptions() {
+            const select = document.getElementById('region-filter');
+            if (!select) return;
+            
+            const regions = new Set();
+            placesData.forEach(p => regions.add(getRegionName(p.address)));
+            
+            const sortedRegions = Array.from(regions).sort();
+            const prevVal = select.value;
+            
+            let html = `<option value="전체">전체 지역</option>`;
+            sortedRegions.forEach(r => {
+                html += `<option value="${escapeHtml(r)}">${escapeHtml(r)}</option>`;
+            });
+            select.innerHTML = html;
+            
+            // 이전에 선택했던 필터값이 여전히 유효하다면 유지
+            if (sortedRegions.includes(prevVal) || prevVal === '전체') {
+                select.value = prevVal;
+                currentRegion = prevVal;
+            } else {
+                select.value = '전체';
+                currentRegion = '전체';
+            }
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            const toastIcon = document.getElementById('toast-icon');
+            if (!toast || !toastMsg) return;
+
+            toastMsg.innerText = msg;
+            
+            if (isError) {
+                toastIcon.className = "fa-solid fa-triangle-exclamation text-rose-400 text-sm";
+                toast.classList.replace('border-slate-600/50', 'border-rose-900/80');
+            } else {
+                toastIcon.className = "fa-solid fa-circle-check text-emerald-400 text-sm";
+                toast.classList.replace('border-rose-900/80', 'border-slate-600/50');
+            }
+
+            toast.classList.remove('opacity-0', 'pointer-events-none', 'translate-y-[-20px]');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', 'pointer-events-none', 'translate-y-[-20px]');
+            }, 3000);
+        }
+
+        function initMobileDragSheet() {
+            const sidebar = document.getElementById('sidebar-panel');
+            const handle = document.getElementById('drag-handle');
+            if (!sidebar || !handle) return;
+
+            let startY = 0;
+            let startHeight = 0;
+            let isDragging = false;
+            let viewportHeight = window.innerHeight;
+
+            const MIN_HEIGHT = 64; // 최소화 모드 높이 (헤더 + 핸들 크기 고려)
+
+            function onTouchStart(e) {
+                // 데스크탑 모드(md 이상) 방어 로직: 768px 이상에서는 드래그 작동안함
+                if (window.innerWidth >= 768) return; 
+                
+                isDragging = true;
+                startY = e.touches[0].clientY;
+                startHeight = sidebar.getBoundingClientRect().height;
+                sidebar.style.transition = 'none'; // 드래그 중에는 부드러운 전환 효과 제거
+                viewportHeight = window.innerHeight;
+            }
+
+            function onTouchMove(e) {
+                if (!isDragging || window.innerWidth >= 768) return;
+                
+                const currentY = e.touches[0].clientY;
+                const deltaY = startY - currentY;
+                let newHeight = startHeight + deltaY;
+
+                // 높이 제한 (최소 64px ~ 최대 화면의 85%)
+                const maxHeight = viewportHeight * 0.85;
+                if (newHeight < MIN_HEIGHT) newHeight = MIN_HEIGHT;
+                if (newHeight > maxHeight) newHeight = maxHeight;
+
+                sidebar.style.height = `${newHeight}px`;
+            }
+
+            function onTouchEnd(e) {
+                if (!isDragging || window.innerWidth >= 768) return;
+                isDragging = false;
+                sidebar.style.transition = 'height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                
+                const finalHeight = sidebar.getBoundingClientRect().height;
+                const threshold = viewportHeight * 0.35; // 35% 미만으로 내리면 최소화
+
+                if (finalHeight < threshold) {
+                    sidebar.style.height = `${MIN_HEIGHT}px`; // 지도 전체화면 모드
+                } else {
+                    sidebar.style.height = '58%'; // 기본 리스트 모드
+                }
+                
+                // 지도 크기 재조정
+                setTimeout(() => {
+                    if (map) map.relayout();
+                }, 310);
+            }
+
+            // 터치 이벤트 바인딩
+            handle.addEventListener('touchstart', onTouchStart, {passive: true});
+            window.addEventListener('touchmove', onTouchMove, {passive: true});
+            window.addEventListener('touchend', onTouchEnd);
+
+            // 핸들 클릭 시 토글 기능 지원
+            handle.addEventListener('click', () => {
+                if (window.innerWidth >= 768) return;
+                sidebar.style.transition = 'height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1)';
+                
+                const currentHeight = sidebar.getBoundingClientRect().height;
+                if (currentHeight <= MIN_HEIGHT + 10) {
+                    sidebar.style.height = '58%'; // 열기
+                } else {
+                    sidebar.style.height = `${MIN_HEIGHT}px`; // 닫기
+                }
+                
+                setTimeout(() => {
+                    if (map) map.relayout();
+                }, 310);
+            });
+        }
+
+        function toggleSortMode() {
+            if (currentSort === 'rating') {
+                let centerLat = null;
+                let centerLng = null;
+
+                if (!isFallbackMode && map && typeof kakao !== 'undefined') {
+                    const center = map.getCenter();
+                    centerLat = center.getLat();
+                    centerLng = center.getLng();
+                } else if (leafletMap) {
+                    const center = leafletMap.getCenter();
+                    centerLat = center.lat;
+                    centerLng = center.lng;
+                }
+
+                if (centerLat !== null && centerLng !== null) {
+                    userLat = centerLat;
+                    userLng = centerLng;
+                    currentSort = 'distance';
+                    
+                    document.getElementById('sort-icon').className = 'fa-solid fa-location-arrow';
+                    document.getElementById('sort-text').innerText = '거리 순';
+                    document.getElementById('sort-toggle-btn').className = 'text-emerald-400 flex items-center gap-1 hover:brightness-125 transition cursor-pointer active:scale-95 bg-emerald-950/30 px-2 py-1 rounded-lg border border-emerald-800/50';
+                    
+                    renderUI();
+                    showToast('지도 중앙을 기준으로 가까운 순으로 정렬되었습니다.');
+                } else {
+                    showToast('지도 정보를 불러올 수 없어 거리를 계산할 수 없습니다.', true);
+                }
+            } else {
+                currentSort = 'rating';
+                document.getElementById('sort-icon').className = 'fa-solid fa-arrow-down-wide-short';
+                document.getElementById('sort-text').innerText = '평점 순';
+                document.getElementById('sort-toggle-btn').className = 'text-amber-400 flex items-center gap-1 hover:brightness-125 transition cursor-pointer active:scale-95 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700/50 shadow-sm';
+                renderUI();
+                showToast('다시 평점 높은 순으로 정렬되었습니다.');
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMobileDragSheet();
+            initKakaoMapEngine();
+            listenRealtimeData();
+            
+            // 데스크탑 모드로 리사이징될 때 인라인 스타일 제거하여 레이아웃 꼬임 방지
+            window.addEventListener('resize', () => {
+                if (window.innerWidth >= 768) {
+                    const sidebar = document.getElementById('sidebar-panel');
+                    if (sidebar) sidebar.style.height = ''; 
+                }
+            });
+        });
+
+        // 1. Firebase 실시간 동기화 (onValue)
+        function listenRealtimeData() {
+            onValue(placesRef, (snapshot) => {
+                const data = snapshot.val();
+                placesData = [];
+                if (data) {
+                    Object.keys(data).forEach(key => {
+                        placesData.push({ id: key, ...data[key] });
+                    });
+                }
+                updateRegionFilterOptions(); 
+                renderUI();
+            }, (error) => {
+                console.error("Firebase Database 읽기 실패:", error);
+                showToast("데이터를 불러오는데 실패했습니다. 네트워크를 확인해주세요.", true);
+            });
+        }
+
+        // 2. 카카오 지도 SDK 동적 로딩 및 지도 생성
+        function initKakaoMapEngine() {
+            if (window.kakao && window.kakao.maps) {
+                setupKakaoMap();
+                return;
+            }
+
+            const script = document.createElement('script');
+            script.type = 'text/javascript';
+            script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&libraries=services&autoload=false`;
+
+            script.onload = () => {
+                try {
+                    kakao.maps.load(() => {
+                        setupKakaoMap();
+                    });
+                } catch (e) {
+                    console.warn('Kakao map load failed:', e);
+                    showMapErrorBanner();
+                }
+            };
+
+            script.onerror = (err) => {
+                console.warn('Kakao map script load error:', err);
+                showMapErrorBanner();
+            };
+
+            document.head.appendChild(script);
+        }
+
+        function setupKakaoMap() {
+            const container = document.getElementById('map');
+            if (!container) return;
+
+            const options = {
+                center: new kakao.maps.LatLng(35.1524, 129.0596), // 부산(서면)을 기본 중앙으로
+                level: 5
+            };
+            map = new kakao.maps.Map(container, options);
+            infoWindow = new kakao.maps.InfoWindow({ zIndex: 1 });
+
+            setTimeout(() => {
+                if (map) {
+                    map.relayout();
+                    map.setCenter(new kakao.maps.LatLng(35.1524, 129.0596));
+                    
+                    // 권한이 이미 허용된 상태라면 로드되자마자 조용히 현위치로 이동
+                    if (navigator.permissions) {
+                        navigator.permissions.query({name: 'geolocation'}).then((result) => {
+                            if (result.state === 'granted') {
+                                panToCurrentLocation(true); 
+                            }
+                        });
+                    }
+                }
+            }, 300);
+
+            // 지도 클릭 이벤트: 핀 꽂기 및 신규 등록 폼 오픈
+            kakao.maps.event.addListener(map, 'click', (mouseEvent) => {
+                const lat = mouseEvent.latLng.getLat();
+                const lng = mouseEvent.latLng.getLng();
+
+                if (clickMarker) clickMarker.setMap(null);
+                clickMarker = new kakao.maps.Marker({
+                    position: new kakao.maps.LatLng(lat, lng),
+                    map: map
+                });
+
+                const geocoder = new kakao.maps.services.Geocoder();
+                geocoder.coord2Address(lng, lat, (result, status) => {
+                    let addressName = '선택 위치 주소';
+                    if (status === kakao.maps.services.Status.OK && result[0]) {
+                        addressName = result[0].road_address 
+                            ? result[0].road_address.address_name 
+                            : result[0].address.address_name;
+                    }
+                    
+                    const isEditing = !!document.getElementById('place-id').value;
+                    const formPanel = document.getElementById('form-panel');
+                    const isFormOpen = !formPanel.classList.contains('hidden');
+
+                    if (isEditing && isFormOpen) {
+                        updateFormLocation(lat, lng, addressName);
+                        showToast('📍 클릭한 위치로 마커가 변경되었습니다.');
+                    } else {
+                        openFormForAdd(lat, lng, addressName);
+                    }
+                });
+            });
+
+            window.addEventListener('resize', () => {
+                if (map) map.relayout();
+            });
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    if (map) map.relayout();
+                }, 200);
+            });
+
+            renderUI();
+        }
+
+        function showMapErrorBanner() {
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.remove('hidden');
+        }
+
+        function retryKakaoMap() {
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.add('hidden');
+            initKakaoMapEngine();
+        }
+
+        function useOpenStreetMapFallback() {
+            if (isFallbackMode) return;
+            isFallbackMode = true;
+
+            const banner = document.getElementById('map-error-banner');
+            if (banner) banner.classList.add('hidden');
+
+            const css = document.createElement('link');
+            css.rel = 'stylesheet';
+            css.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+            document.head.appendChild(css);
+
+            const js = document.createElement('script');
+            js.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+            js.onload = () => {
+                const container = document.getElementById('map');
+                container.innerHTML = '';
+                
+                leafletMap = L.map('map').setView([35.1524, 129.0596], 13);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap'
+                }).addTo(leafletMap);
+
+                leafletMap.on('click', (e) => {
+                    const lat = e.latlng.lat;
+                    const lng = e.latlng.lng;
+                    const addressName = `선택 좌표 (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+
+                    const isEditing = !!document.getElementById('place-id').value;
+                    if (isEditing) {
+                        updateFormLocation(lat, lng, addressName);
+                        showToast('📍 클릭한 위치로 변경되었습니다.');
+                    } else {
+                        openFormForAdd(lat, lng, addressName);
+                    }
+                });
+
+                panToCurrentLocation(true);
+                renderUI();
+            };
+            document.head.appendChild(js);
+        }
+
+        function updateFormLocation(lat, lng, address) {
+            document.getElementById('input-lat').value = lat;
+            document.getElementById('input-lng').value = lng;
+            document.getElementById('input-address').value = address;
+        }
+
+        // 현위치 표시 및 권한 자동 확인 로직
+        function panToCurrentLocation(isSilent = false) {
+            if (!navigator.geolocation) {
+                if(!isSilent) showToast('현재 브라우저에서는 위치 기능을 지원하지 않습니다.', true);
+                return;
+            }
+
+            const getLoc = () => {
+                navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                        const lat = pos.coords.latitude;
+                        const lng = pos.coords.longitude;
+                        
+                        // 기존 현위치 마커 제거
+                        if (userLocOverlay && userLocOverlay.setMap) userLocOverlay.setMap(null);
+                        if (userLocLeafletMarker && leafletMap) leafletMap.removeLayer(userLocLeafletMarker);
+
+                        // 맥박 뛰는 파란색 점 애니메이션 UI 생성
+                        const pointHtml = `
+                            <div class="relative flex items-center justify-center w-6 h-6">
+                                <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-600 border border-white shadow-md"></span>
+                            </div>
+                        `;
+
+                        if (!isFallbackMode && map && typeof kakao !== 'undefined') {
+                            const currentLatLng = new kakao.maps.LatLng(lat, lng);
+                            map.panTo(currentLatLng);
+                            
+                            userLocOverlay = new kakao.maps.CustomOverlay({
+                                position: currentLatLng,
+                                content: pointHtml,
+                                map: map,
+                                yAnchor: 0.5,
+                                zIndex: 9999 
+                            });
+                        } else if (leafletMap) {
+                            leafletMap.setView([lat, lng], 15);
+                            
+                            const customIcon = L.divIcon({
+                                className: 'custom-div-icon',
+                                html: pointHtml,
+                                iconSize: [24, 24],
+                                iconAnchor: [12, 12]
+                            });
+                            userLocLeafletMarker = L.marker([lat, lng], {icon: customIcon}).addTo(leafletMap);
+                        }
+                        
+                        if(!isSilent) showToast('현재 내 위치로 이동했습니다.');
+                    },
+                    (error) => {
+                        console.warn("Geolocation failed:", error);
+                        if(!isSilent) {
+                            if (error.code === error.PERMISSION_DENIED) {
+                                showToast('위치 권한이 거부되었습니다. 주소창의 자물쇠 아이콘을 눌러 권한을 허용해 주세요.', true);
+                            } else {
+                                showToast('위치 정보를 가져올 수 없습니다. 네트워크나 GPS 상태를 확인하세요.', true);
+                            }
+                        }
+                    },
+                    { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+                );
+            };
+
+            // 권한 API를 지원하면 미리 체크
+            if (navigator.permissions) {
+                navigator.permissions.query({name: 'geolocation'}).then((result) => {
+                    if (result.state === 'denied') {
+                        if(!isSilent) showToast('위치 권한이 차단되어 있습니다. 브라우저 설정에서 권한을 허용해주세요.', true);
+                    } else {
+                        getLoc();
+                    }
+                });
+            } else {
+                getLoc(); // 사파리 등 permissions API 미지원 브라우저용 폴백
+            }
+        }
+
+        function renderUI() {
+            let filtered = [];
+            
+            if (isRecommendationMode) {
+                filtered = placesData.filter(p => recommendedPlaceIds.includes(p.id));
+                filtered.sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+            } else {
+                // 카테고리(currentFilter) 및 지역(currentRegion) 필터 동시 적용
+                filtered = placesData.filter(p => {
+                    const matchCategory = currentFilter === '전체' || p.category === currentFilter;
+                    const matchRegion = currentRegion === '전체' || getRegionName(p.address) === currentRegion;
+                    return matchCategory && matchRegion;
+                });
+
+                if (currentSort === 'rating') {
+                    filtered.sort((a, b) => parseFloat(b.rating) - parseFloat(a.rating));
+                } else if (currentSort === 'distance' && userLat && userLng) {
+                    filtered.forEach(p => {
+                        p.distance = getDistanceFromLatLonInKm(userLat, userLng, parseFloat(p.latitude), parseFloat(p.longitude));
+                    });
+                    filtered.sort((a, b) => a.distance - b.distance);
+                }
+            }
+
+            document.getElementById('place-count-badge').innerText = `총 ${filtered.length}곳`;
+
+            // 기존 마커 전체 초기화
+            if (markers) markers.forEach(m => { if (m.setMap) m.setMap(null); });
+            markers = [];
+            customOverlays = {}; 
+
+            if (leafletMarkers && leafletMap) leafletMarkers.forEach(m => leafletMap.removeLayer(m));
+            leafletMarkers = [];
+
+            const listContainer = document.getElementById('place-list');
+            listContainer.innerHTML = '';
+            
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="p-10 text-center text-slate-500 text-xs flex flex-col items-center">
+                        <div class="bg-slate-800/50 p-4 rounded-full mb-3">
+                            <i class="fa-solid fa-utensils text-3xl text-slate-600"></i>
+                        </div>
+                        <p class="font-medium text-slate-400">조건에 맞는 맛집이 없습니다.</p>
+                        <p class="mt-1 text-[10px] text-slate-500">필터를 변경하거나 새로운 장소를 등록해보세요.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            filtered.forEach((place, index) => {
+                const lat = parseFloat(place.latitude) || 37.5665;
+                const lng = parseFloat(place.longitude) || 126.9780;
+
+                const ratingDisplay = parseFloat(place.rating) === 0 
+                    ? '<span class="text-rose-400 font-bold flex items-center gap-1"><i class="fa-solid fa-thumbtack text-rose-500/80"></i> 방문예정</span>' 
+                    : `<span class="text-amber-400 font-bold flex items-center gap-1"><i class="fa-solid fa-star text-amber-500/80"></i> ${parseFloat(place.rating).toFixed(1)}</span>`;
+
+                let distanceDisplay = '';
+                if (currentSort === 'distance' && place.distance !== undefined) {
+                    const distStr = place.distance < 1 
+                        ? `${(place.distance * 1000).toFixed(0)}m` 
+                        : `${place.distance.toFixed(1)}km`;
+                    distanceDisplay = `<span class="text-emerald-400 font-bold text-[10px] ml-1 bg-emerald-950/40 px-1.5 py-0.5 rounded-md border border-emerald-800/60"><i class="fa-solid fa-location-arrow mr-0.5"></i>${distStr}</span>`;
+                }
+
+                const naverMapUrl = `https://map.naver.com/index.nhn?slng=&slat=&stext=&elng=${lng}&elat=${lat}&etext=${encodeURIComponent(place.name)}&menu=route`;
+                const memoText = place.memo ? escapeHtml(place.memo).trim() : '작성된 메모/리뷰가 없습니다.';
+
+                if (!isFallbackMode && map && typeof kakao !== 'undefined' && kakao.maps) {
+                    const markerPosition = new kakao.maps.LatLng(lat, lng);
+                    
+                    const overlayContent = `
+                        <div id="overlay-wrap-${place.id}" onmousedown="bringToFront('${place.id}')" ontouchstart="bringToFront('${place.id}')" class="bg-slate-900/95 backdrop-blur-md border border-slate-700 shadow-2xl rounded-xl p-3 flex flex-col items-center justify-center min-w-[150px] max-w-[240px] transition-all transform hover:scale-105" style="box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);">
+                            
+                            <div class="cursor-pointer w-full text-center group" onclick="toggleOverlayMemo('${place.id}')">
+                                <span class="text-slate-100 font-bold text-[13px] leading-tight mb-1.5 block break-words whitespace-normal group-hover:text-indigo-400 transition-colors">${escapeHtml(place.name)}</span>
+                                <div class="flex items-center justify-center gap-1.5 bg-slate-950/50 rounded-lg py-1 px-2 border border-slate-800 mx-auto w-fit">
+                                    <span class="text-[11px] whitespace-nowrap">${ratingDisplay}</span>
+                                    <i class="fa-solid fa-chevron-down text-[8px] text-slate-500 group-hover:text-slate-300 transition-colors"></i>
+                                </div>
+                            </div>
+                            
+                            <div id="overlay-memo-${place.id}" class="hidden w-full mt-2.5 pt-2.5 border-t border-slate-700/80">
+                                <p class="text-[11px] text-slate-300 mb-2.5 leading-relaxed break-all whitespace-pre-wrap text-left">${memoText}</p>
+                                
+                                <div class="flex gap-1.5 w-full">
+                                    <a href="${naverMapUrl}" target="_blank" rel="noopener noreferrer" class="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 text-[11px] font-medium decoration-none">
+                                        <i class="fa-solid fa-diamond-turn-right"></i> 길찾기
+                                    </a>
+                                    <button onclick="openFormForEdit('${place.id}')" class="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg shadow-sm transition flex items-center justify-center gap-1.5 text-[11px] font-medium">
+                                        <i class="fa-solid fa-pen"></i> 수정
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            <div class="absolute -bottom-2 left-1/2 -translate-x-1/2 w-4 h-4 bg-slate-900/95 border-b border-r border-slate-700 transform rotate-45"></div>
+                        </div>
+                    `;
+
+                    const customOverlay = new kakao.maps.CustomOverlay({
+                        position: markerPosition,
+                        content: overlayContent,
+                        map: map,
+                        yAnchor: 1.1, 
+                        clickable: true 
+                    });
+
+                    customOverlays[place.id] = customOverlay;
+                    markers.push(customOverlay);
+                    
+                } 
+                else if (leafletMap) {
+                    const lMarker = L.marker([lat, lng]).addTo(leafletMap)
+                        .bindPopup(`
+                            <div style="text-align:center; font-size: 13px; font-family: sans-serif; min-width: 140px; max-width: 240px;">
+                                <b style="display:block; margin-bottom: 6px; color:#1e293b; word-break:break-word; white-space:normal;">${escapeHtml(place.name)}</b>
+                                <div style="display:inline-block; background:#f1f5f9; padding:4px 8px; border-radius:6px; margin-bottom:10px;">${ratingDisplay}</div>
+                                
+                                <div style="text-align:left; font-size:11px; color:#475569; word-break:break-all; white-space:pre-wrap; margin-bottom:10px; border-top:1px solid #e2e8f0; padding-top:8px;">
+                                    ${memoText}
+                                </div>
+                                
+                                <div style="display:flex; gap:6px;">
+                                    <a href="${naverMapUrl}" target="_blank" style="flex:1; background:#059669; color:white; padding:6px 0; border-radius:6px; text-decoration:none; font-size:11px; font-weight:bold;">📍 길찾기</a>
+                                    <button onclick="openFormForEdit('${place.id}')" style="flex:1; background:#4f46e5; color:white; padding:6px 0; border-radius:6px; border:none; font-size:11px; font-weight:bold; cursor:pointer;">✏️ 수정</button>
+                                </div>
+                            </div>
+                        `);
+                    leafletMarkers.push(lMarker);
+                }
+
+                const itemEl = document.createElement('div');
+                itemEl.className = 'p-3.5 hover:bg-slate-800/80 transition cursor-pointer flex justify-between items-start group';
+                itemEl.innerHTML = `
+                    <div class="flex-1 min-w-0 pr-3" onclick="focusPlace(${lat}, ${lng}, '${place.id}')">
+                        <div class="flex items-center gap-2 mb-1.5 flex-wrap">
+                            <span class="text-[9px] font-extrabold bg-indigo-950 text-indigo-400 border border-indigo-800/50 px-2 py-0.5 rounded-md shadow-sm">TOP ${index + 1}</span>
+                            <span class="font-bold text-slate-100 text-[15px] group-hover:text-indigo-400 transition truncate tracking-tight">${escapeHtml(place.name)}</span>
+                            <span class="text-[10px] px-2 py-0.5 bg-slate-800 text-slate-300 rounded-md border border-slate-700/60 font-medium">${escapeHtml(place.category)}</span>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mb-2 line-clamp-1 flex items-center gap-1"><i class="fa-solid fa-location-dot text-[10px] text-slate-500 opacity-70"></i> ${escapeHtml(place.address)}</p>
+                        <div class="flex items-center gap-1.5 text-xs">
+                            ${ratingDisplay}
+                            ${distanceDisplay}
+                            ${place.memo ? `<span class="text-slate-500 text-[11px] truncate max-w-[150px] ml-2 border-l border-slate-700 pl-2 opacity-80">${escapeHtml(place.memo)}</span>` : ''}
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-1 md:opacity-0 group-hover:opacity-100 transition items-center bg-slate-900/80 backdrop-blur px-1 py-1 rounded-lg border border-slate-800 shadow-sm">
+                        <a href="${naverMapUrl}" target="_blank" rel="noopener noreferrer" class="p-2 text-slate-400 hover:text-emerald-400 hover:bg-emerald-950/30 rounded-md transition" title="길찾기">
+                            <i class="fa-solid fa-diamond-turn-right text-[15px]"></i>
+                        </a>
+                        <button onclick="openFormForEdit('${place.id}')" class="p-2 text-slate-400 hover:text-indigo-400 hover:bg-indigo-950/30 rounded-md transition" title="수정">
+                            <i class="fa-solid fa-pen-to-square text-[15px]"></i>
+                        </button>
+                        <button onclick="deletePlace('${place.id}')" class="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-md transition" title="삭제">
+                            <i class="fa-solid fa-trash-can text-[15px]"></i>
+                        </button>
+                    </div>
+                `;
+                listContainer.appendChild(itemEl);
+            });
+        }
+
+        // 오버레이 클릭 시 겹침 문제 해결을 위해 최상단으로 끌어올림
+        function bringToFront(id) {
+            if (customOverlays[id]) {
+                maxZIndex++;
+                customOverlays[id].setZIndex(maxZIndex);
+            }
+        }
+
+        // 오버레이 내 메모 토글
+        function toggleOverlayMemo(id) {
+            const memoEl = document.getElementById(`overlay-memo-${id}`);
+            if (memoEl) {
+                memoEl.classList.toggle('hidden');
+                // 클릭 시 팝업 내용이 늘어나므로 최상단으로 한 번 더 올림
+                bringToFront(id); 
+            }
+        }
+
+        function filterCategory(cat) {
+            isRecommendationMode = false; 
+            currentFilter = cat;
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                if (btn.innerText.includes(cat)) {
+                    btn.className = 'category-btn active bg-indigo-600 text-white px-3 py-1.5 rounded-full font-semibold whitespace-nowrap shadow-sm';
+                } else {
+                    btn.className = 'category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition';
+                }
+            });
+
+            renderUI();
+
+            if (cat === '전체' && currentRegion === '전체' && map && placesData.length > 0 && typeof kakao !== 'undefined' && kakao.maps) {
+                const bounds = new kakao.maps.LatLngBounds();
+                placesData.forEach(p => bounds.extend(new kakao.maps.LatLng(p.latitude, p.longitude)));
+                if(!bounds.isEmpty()) map.setBounds(bounds);
+            }
+        }
+
+        // 지역 필터 실행 함수
+        function filterRegion(val) {
+            currentRegion = val;
+            isRecommendationMode = false;
+            renderUI();
+
+            if (!isFallbackMode && map && typeof kakao !== 'undefined' && kakao.maps) {
+                const filtered = placesData.filter(p => {
+                    const matchCategory = currentFilter === '전체' || p.category === currentFilter;
+                    const matchRegion = currentRegion === '전체' || getRegionName(p.address) === currentRegion;
+                    return matchCategory && matchRegion;
+                });
+                
+                if (filtered.length > 0) {
+                    const bounds = new kakao.maps.LatLngBounds();
+                    filtered.forEach(p => bounds.extend(new kakao.maps.LatLng(parseFloat(p.latitude), parseFloat(p.longitude))));
+                    if(!bounds.isEmpty()) map.setBounds(bounds);
+                } else {
+                    showToast('해당 지역에는 맛집이 없습니다.');
+                }
+            }
+        }
+
+        function focusPlace(lat, lng, id) {
+            if (!isFallbackMode && map && typeof kakao !== 'undefined') {
+                const loc = new kakao.maps.LatLng(lat, lng);
+                map.panTo(loc);
+                
+                // 해당 마커 최상단으로 배치 후 메모 강제 오픈
+                setTimeout(() => {
+                    bringToFront(id);
+                    const memoEl = document.getElementById(`overlay-memo-${id}`);
+                    if (memoEl) memoEl.classList.remove('hidden');
+                }, 300);
+
+            } else if (leafletMap) {
+                leafletMap.setView([lat, lng], 16);
+            }
+            
+            // 모바일에서 리스트 아이템 클릭 시 지도가 잘 보이도록 시트를 자동으로 살짝 내림
+            if (window.innerWidth < 768) {
+                const sidebar = document.getElementById('sidebar-panel');
+                if (sidebar) {
+                    sidebar.style.transition = 'height 0.3s ease';
+                    sidebar.style.height = '40%';
+                }
+            }
+        }
+
+        function selectSearchResult(lat, lng, name, address) {
+            lat = parseFloat(lat);
+            lng = parseFloat(lng);
+            
+            document.getElementById('input-name').value = name;
+            updateFormLocation(lat, lng, address);
+            
+            document.getElementById('name-search-results').classList.add('hidden');
+
+            if (map && !isFallbackMode) {
+                map.panTo(new kakao.maps.LatLng(lat, lng));
+                if (clickMarker) clickMarker.setMap(null);
+                clickMarker = new kakao.maps.Marker({
+                    position: new kakao.maps.LatLng(lat, lng),
+                    map: map
+                });
+            } else if (leafletMap) {
+                leafletMap.setView([lat, lng], 16);
+            }
+            
+            showToast(`'${name}' 위치가 지정되었습니다.`);
+        }
+
+        function searchAddress() {
+            const keyword = document.getElementById('input-name').value.trim();
+            const resultsContainer = document.getElementById('name-search-results');
+            resultsContainer.innerHTML = '';
+            
+            if (!keyword) {
+                showToast('검색할 상호명을 먼저 입력해 주세요.', true);
+                resultsContainer.classList.add('hidden');
+                return;
+            }
+
+            if (!isFallbackMode && typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services) {
+                const ps = new kakao.maps.services.Places();
+                const options = map ? {
+                    location: map.getCenter(),
+                    sort: kakao.maps.services.SortBy.DISTANCE
+                } : {};
+
+                ps.keywordSearch(keyword, (data, status) => {
+                    if (status === kakao.maps.services.Status.OK && data.length > 0) {
+                        resultsContainer.classList.remove('hidden');
+                        
+                        data.forEach((place) => {
+                            const lat = parseFloat(place.y);
+                            const lng = parseFloat(place.x);
+                            const address = place.road_address_name || place.address_name;
+                            
+                            const li = document.createElement('li');
+                            li.className = 'p-3 hover:bg-slate-700 cursor-pointer transition';
+                            li.innerHTML = `
+                                <div class="font-bold text-slate-100 flex items-center justify-between mb-0.5">
+                                    <span class="truncate">${escapeHtml(place.place_name)}</span>
+                                    ${place.category_name ? `<span class="text-[10px] text-indigo-300 font-normal bg-indigo-950/80 border border-indigo-800/50 px-1.5 py-0.5 rounded whitespace-nowrap ml-2">${escapeHtml(place.category_name.split(' > ').pop())}</span>` : ''}
+                                </div>
+                                <div class="text-[11px] text-slate-400"><i class="fa-solid fa-location-dot mr-1 text-slate-500"></i>${escapeHtml(address)}</div>
+                            `;
+                            li.onclick = () => selectSearchResult(lat, lng, place.place_name, address);
+                            resultsContainer.appendChild(li);
+                        });
+                        
+                        showToast(`검색된 장소 중 하나를 선택해 주세요.`);
+                    } else {
+                        resultsContainer.classList.add('hidden');
+                        showToast('상호명 검색 결과를 찾을 수 없습니다.', true);
+                    }
+                }, options);
+            } else {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(keyword)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.length > 0) {
+                            resultsContainer.classList.remove('hidden');
+                            data.forEach(place => {
+                                const lat = parseFloat(place.lat);
+                                const lng = parseFloat(place.lon);
+                                const address = place.display_name;
+                                
+                                const li = document.createElement('li');
+                                li.className = 'p-3 hover:bg-slate-700 cursor-pointer transition';
+                                li.innerHTML = `
+                                    <div class="font-bold text-slate-100">${escapeHtml(keyword)} (유사 위치)</div>
+                                    <div class="text-[11px] text-slate-400 mt-1 line-clamp-2">${escapeHtml(address)}</div>
+                                `;
+                                li.onclick = () => selectSearchResult(lat, lng, keyword, address);
+                                resultsContainer.appendChild(li);
+                            });
+                            showToast(`검색된 장소 중 하나를 선택해 주세요.`);
+                        } else {
+                            resultsContainer.classList.add('hidden');
+                            showToast('상호명 검색 결과를 찾지 못했습니다.', true);
+                        }
+                    }).catch(() => showToast('검색 중 오류가 발생했습니다.', true));
+            }
+        }
+
+        function searchSpecificAddress() {
+            const address = document.getElementById('input-address').value.trim();
+            if (!address) {
+                showToast('검색할 주소를 입력해 주세요.', true);
+                return;
+            }
+
+            if (!isFallbackMode && typeof kakao !== 'undefined' && kakao.maps && kakao.maps.services) {
+                const geocoder = new kakao.maps.services.Geocoder();
+                
+                geocoder.addressSearch(address, (data, status) => {
+                    if (status === kakao.maps.services.Status.OK && data.length > 0) {
+                        const place = data[0];
+                        const lat = parseFloat(place.y);
+                        const lng = parseFloat(place.x);
+                        const addressName = place.road_address ? place.road_address.address_name : place.address.address_name;
+
+                        updateFormLocation(lat, lng, addressName);
+
+                        if (map) {
+                            map.panTo(new kakao.maps.LatLng(lat, lng));
+                            
+                            if (clickMarker) clickMarker.setMap(null);
+                            clickMarker = new kakao.maps.Marker({
+                                position: new kakao.maps.LatLng(lat, lng),
+                                map: map
+                            });
+                        }
+                        showToast('입력하신 주소 위치를 확인했습니다.');
+                    } else {
+                        // 주소 검색 실패 시 키워드 장소 검색으로 재시도
+                        const ps = new kakao.maps.services.Places();
+                        ps.keywordSearch(address, (data2, status2) => {
+                            if (status2 === kakao.maps.services.Status.OK && data2.length > 0) {
+                                const place2 = data2[0];
+                                const lat2 = parseFloat(place2.y);
+                                const lng2 = parseFloat(place2.x);
+                                const addressName2 = place2.road_address_name || place2.address_name;
+
+                                updateFormLocation(lat2, lng2, addressName2);
+                                if (map) {
+                                    map.panTo(new kakao.maps.LatLng(lat2, lng2));
+                                    
+                                    if (clickMarker) clickMarker.setMap(null);
+                                    clickMarker = new kakao.maps.Marker({
+                                        position: new kakao.maps.LatLng(lat2, lng2),
+                                        map: map
+                                    });
+                                }
+                                showToast('입력하신 장소 위치를 확인했습니다.');
+                            } else {
+                                showToast('해당 주소나 장소를 찾을 수 없습니다.', true);
+                            }
+                        });
+                    }
+                });
+            } else {
+                fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`)
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data && data.length > 0) {
+                            const lat = parseFloat(data[0].lat);
+                            const lng = parseFloat(data[0].lon);
+                            updateFormLocation(lat, lng, data[0].display_name);
+                            if (leafletMap) leafletMap.setView([lat, lng], 16);
+                            showToast('입력하신 주소 위치가 적용되었습니다.');
+                        } else {
+                            showToast('주소 검색 결과를 찾지 못했습니다.', true);
+                        }
+                    }).catch(() => showToast('주소 검색 중 오류가 발생했습니다.', true));
+            }
+        }
+
+        function openFormForAdd(lat = '', lng = '', address = '') {
+            const formPanel = document.getElementById('form-panel');
+            formPanel.classList.remove('hidden');
+            formPanel.classList.add('translate-y-0');
+            
+            document.getElementById('form-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-400"></i> 새로운 맛집 등록`;
+            document.getElementById('place-id').value = '';
+            document.getElementById('place-form').reset();
+
+            if (lat && lng) {
+                updateFormLocation(lat, lng, address);
+            }
+        }
+
+        function openFormForEdit(id) {
+            const place = placesData.find(p => p.id === id);
+            if (!place) return;
+
+            const formPanel = document.getElementById('form-panel');
+            formPanel.classList.remove('hidden');
+            document.getElementById('form-title').innerHTML = `<i class="fa-solid fa-pen-to-square text-indigo-400"></i> 맛집 정보 수정`;
+            
+            document.getElementById('place-id').value = place.id;
+            document.getElementById('input-name').value = place.name;
+            document.getElementById('input-address').value = place.address;
+            document.getElementById('input-lat').value = place.latitude;
+            document.getElementById('input-lng').value = place.longitude;
+            document.getElementById('input-category').value = place.category;
+            document.getElementById('input-rating').value = parseFloat(place.rating).toFixed(1);
+            document.getElementById('input-memo').value = place.memo || '';
+
+            if (!isFallbackMode && map && typeof kakao !== 'undefined') {
+                map.panTo(new kakao.maps.LatLng(place.latitude, place.longitude));
+            }
+        }
+
+        function closeForm() {
+            const formPanel = document.getElementById('form-panel');
+            formPanel.classList.add('hidden');
+            document.getElementById('name-search-results').classList.add('hidden');
+            if (clickMarker && clickMarker.setMap) clickMarker.setMap(null);
+        }
+
+        function handleFormSubmit(event) {
+            event.preventDefault();
+            const id = document.getElementById('place-id').value;
+            const name = document.getElementById('input-name').value.trim();
+            const address = document.getElementById('input-address').value.trim();
+            const lat = document.getElementById('input-lat').value;
+            const lng = document.getElementById('input-lng').value;
+            const category = document.getElementById('input-category').value;
+            const rating = parseFloat(document.getElementById('input-rating').value);
+            const memo = document.getElementById('input-memo').value.trim();
+
+            if (!name || !address) {
+                showToast('상호명과 주소를 모두 입력해주세요.', true);
+                return;
+            }
+
+            const payload = {
+                name,
+                address,
+                latitude: lat ? parseFloat(lat) : 35.1524,
+                longitude: lng ? parseFloat(lng) : 129.0596,
+                category,
+                rating,
+                memo,
+                updatedAt: Date.now()
+            };
+
+            if (id) {
+                update(ref(db, `restaurants/${id}`), payload)
+                    .then(() => {
+                        showToast(`'${name}' 정보가 성공적으로 수정되었습니다.`);
+                        closeForm();
+                    })
+                    .catch((err) => {
+                        console.error('Firebase 업데이트 에러:', err);
+                        showToast('서버 접속 또는 권한 오류로 수정에 실패했습니다.', true);
+                    });
+            } else {
+                push(placesRef, payload)
+                    .then(() => {
+                        showToast(`'${name}' 맛집이 신규 등록되었습니다. 🎉`);
+                        closeForm();
+                        
+                        // 지역 필터가 전체가 아니라면, 방금 등록한 장소가 보이도록 전체로 강제 변경
+                        if(currentRegion !== '전체') {
+                            document.getElementById('region-filter').value = '전체';
+                            filterRegion('전체');
+                        }
+                    })
+                    .catch((err) => {
+                        console.error('Firebase 등록 에러:', err);
+                        showToast('서버 접속 또는 권한 오류로 등록에 실패했습니다.', true);
+                    });
+            }
+        }
+
+        function deletePlace(id) {
+            const place = placesData.find(p => p.id === id);
+            const name = place ? place.name : '해당 맛집';
+            
+            if (confirm(`'${name}' 항목을 정말로 삭제하시겠습니까?`)) {
+                remove(ref(db, `restaurants/${id}`))
+                    .then(() => {
+                        showToast(`'${name}' 항목이 삭제되었습니다.`);
+                    })
+                    .catch((err) => {
+                        console.error('Firebase 삭제 에러:', err);
+                        showToast('삭제에 실패했습니다. 관리자 권한을 확인하세요.', true);
+                    });
+            }
+        }
+
+        // 반경 10km 이내 추천 로직
+        function recommendPlaces() {
+            let centerLat = null;
+            let centerLng = null;
+
+            if (!isFallbackMode && map && typeof kakao !== 'undefined') {
+                const center = map.getCenter();
+                centerLat = center.getLat();
+                centerLng = center.getLng();
+            } else if (leafletMap) {
+                const center = leafletMap.getCenter();
+                centerLat = center.lat;
+                centerLng = center.lng;
+            }
+
+            if (centerLat === null || centerLng === null) {
+                showToast('지도 위치를 확인할 수 없어 추천할 수 없습니다.', true);
+                return;
+            }
+
+            let allCandidates = placesData.filter(p => {
+                if (p.category === '카페') return false; // 카페 제외
+                const dist = getDistanceFromLatLonInKm(centerLat, centerLng, parseFloat(p.latitude), parseFloat(p.longitude));
+                return dist <= 10;
+            });
+
+            if (allCandidates.length === 0) {
+                showToast('현재 지도 반경 10km 이내에 추천할 식당이 없습니다.', true);
+                return;
+            }
+
+            let candidates = allCandidates.filter(p => !recommendationHistory.includes(p.id));
+
+            if (candidates.length === 0) {
+                recommendationHistory = [];
+                candidates = [...allCandidates];
+                showToast('주변 맛집을 모두 확인하셨습니다! 다시 새롭게 추천합니다.');
+            } else {
+                showToast('주변 10km 이내 새로운 맛집을 랜덤으로 3곳 추천합니다! 🎲');
+            }
+
+            candidates.sort(() => Math.random() - 0.5);
+            const top3 = candidates.slice(0, 3);
+            
+            recommendationHistory.push(...top3.map(p => p.id));
+            
+            isRecommendationMode = true;
+            recommendedPlaceIds = top3.map(p => p.id);
+
+            // 다른 필터 UI 초기화
+            document.querySelectorAll('.category-btn').forEach(btn => {
+                btn.className = 'category-btn bg-slate-800 text-slate-300 border border-slate-700/60 px-3 py-1.5 rounded-full font-medium whitespace-nowrap hover:bg-slate-700 transition';
+            });
+            document.getElementById('region-filter').value = '전체';
+            currentRegion = '전체';
+
+            renderUI();
+
+            if (!isFallbackMode && map && typeof kakao !== 'undefined' && kakao.maps) {
+                const bounds = new kakao.maps.LatLngBounds();
+                top3.forEach(p => bounds.extend(new kakao.maps.LatLng(parseFloat(p.latitude), parseFloat(p.longitude))));
+                if(!bounds.isEmpty()) map.setBounds(bounds);
+            }
+        }
+
+        // 전역 접근 바인딩
+        Object.assign(window, {
+            panToCurrentLocation,
+            toggleSortMode,
+            filterCategory,
+            filterRegion,
+            openFormForAdd,
+            openFormForEdit,
+            closeForm,
+            handleFormSubmit,
+            deletePlace,
+            searchAddress,
+            searchSpecificAddress,
+            retryKakaoMap,
+            useOpenStreetMapFallback,
+            focusPlace,
+            recommendPlaces,
+            toggleOverlayMemo,
+            bringToFront
+        });
+    </script>
+</body>
+</html>
